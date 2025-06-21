@@ -54,7 +54,7 @@ Epoch 10: Loss=0.0103, Accuracy=99.77%
 Model saved!
 ```
 
-You should have a `train_model.npz` file appearing in the current directory. This is your trained model / neurons network.
+You should have a `train_model.npz` file appearing in the current directory. This is your trained model / neural network.
 
 ## 🔍 Testing
 
