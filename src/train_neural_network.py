@@ -1,157 +1,80 @@
 import idx2numpy
 import numpy as np
-import random
-import math
-import json
 
-from .utils import Perceptron, EntryNeuron, cross_entropy, softmax
 
 images = idx2numpy.convert_from_file("src/train-images.idx3-ubyte")
 labels = idx2numpy.convert_from_file("src/train-labels.idx1-ubyte")
 
 INPUT_SIZE = 28 * 28
+HIDDEN_SIZE = 128
+OUTPUT_SIZE = 10
 LEARNING_RATE = 0.01
+EPOCHS = 10
+
+def relu(x):
+    return np.maximum(0, x)
+
+def relu_derivative(x):
+    return (x > 0).astype(float)
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0, keepdims=True)
+
+def cross_entropy(y_true, y_pred):
+    epsilon = 1e-15
+    return -np.sum(y_true * np.log(np.clip(y_pred, epsilon, 1. - epsilon)))
 
 
-def save_model(hidden_layer, output_layer, filename="src/model.json"):
-    model_data = {
-        "hidden_layer": [
-            {"weights": neuron.weights, "bias": neuron.bias}
-            for neuron in hidden_layer
-        ],
-        "output_layer": [
-            {"weights": neuron.weights, "bias": neuron.bias}
-            for neuron in output_layer
-        ]
-    }
-    with open(filename, "w") as stream:
-        json.dump(model_data, stream)
+
+W_hidden = np.random.randn(HIDDEN_SIZE, INPUT_SIZE) * np.sqrt(2. / INPUT_SIZE)
+b_hidden = np.zeros((HIDDEN_SIZE, 1))
+
+W_output = np.random.randn(OUTPUT_SIZE, HIDDEN_SIZE) * np.sqrt(1. / HIDDEN_SIZE)
+b_output = np.zeros((OUTPUT_SIZE, 1))
 
 
-
-
-print("[+] Initialize the hidden layer.")
-hidden_layer = [
-    Perceptron(
-        entries=[0] * INPUT_SIZE,
-        weights=[0] * INPUT_SIZE,
-        bias=0,
-        activation_function=lambda x: max(0, x),
-    )
-    for _ in range(128)
-]
-
-for perceptron in hidden_layer:
-    perceptron.weights = [
-        random.gauss(0, math.sqrt(2 / INPUT_SIZE)) for _ in range(28 * 28)
-    ]
-
-print("[+] Initialize the output layer.")
-output_layer = [
-    Perceptron(
-        entries=[0] * 128,
-        weights=[0] * 128,
-        bias=0,
-        activation_function=lambda output: output,
-    )
-    for _ in range(10)
-]
-
-for perceptron in output_layer:
-    perceptron.weights = [
-        random.gauss(0, math.sqrt(2 / len(hidden_layer)))
-        for _ in range(len(hidden_layer))
-    ]
-    perceptron.bias = 0
-
-
-for epoch in range(10):
-    print(f"[!] EPOCH {epoch}")
+for epoch in range(EPOCHS):
+    total_loss = 0
     correct = 0
-    total = 0
     for image, label in zip(images, labels):
-        print(f"[+] Initialize input layer with new image.")
-        flat_image = np.array(image).flatten().tolist()
-        input_layer = [EntryNeuron(value=pixel) for pixel in flat_image]
+        x = np.array(image).flatten().reshape(-1, 1) / 255.0
+        z_hidden = W_hidden @ x + b_hidden
+        a_hidden = relu(z_hidden)
 
-        # Compute the hidden layer.
-        print(f"[+] First pass: hidden layer.")
-        for perceptron in hidden_layer:
-            perceptron.entries = [
-                neuron.get_result() for neuron in input_layer
-            ]
+        z_output = W_output @ a_hidden + b_output
+        y_pred = softmax(z_output)
 
-        # Compute the output layer.
-        print(f"[+] Second pass: output layer.")
-        for perceptron in output_layer:
-            perceptron.entries = [
-                neuron.get_result() for neuron in hidden_layer
-            ]
-
-        # Get the outputs.
-        outputs = [perceptron.get_result() for perceptron in output_layer]
-
-        # Softmax.
-        y_pred = softmax(outputs)
-
-        # print(f"[+] Result: {y_pred}")
-        prediction = np.argmax(y_pred)
-        print(f" Prediction: {prediction} — Correct: {label}")
-
-        y_true = [1 if i == label else 0 for i in range(10)]
+        y_true = np.zeros((OUTPUT_SIZE, 1))
+        y_true[label] = 1
 
         loss = cross_entropy(y_true, y_pred)
-        print(f"Loss: {loss}")
-
-        output_deltas = [y_p - y_t for y_p, y_t in zip(y_pred, y_true)]
-
-        if prediction == label:
+        total_loss += loss
+        if np.argmax(y_pred) == label:
             correct += 1
-        total += 1
 
-        print("Adjust the weights and the bias.")
-        # Update the output layer.
-        for j, neuron in enumerate(output_layer):
-            new_weights = list()
-            for i, weight in enumerate(neuron.weights):
-                new_weights.append(
-                    weight
-                    - LEARNING_RATE
-                    * output_deltas[j]
-                    * hidden_layer[i].get_result()
-                )
-            neuron.bias -= LEARNING_RATE * output_deltas[j]
-            neuron.weights = new_weights
+        dz_output = y_pred - y_true                             # (10, 1)
+        dW_output = dz_output @ a_hidden.T                      # (10, 128)
+        db_output = dz_output                                   # (10, 1)
 
-        # Retropropagate.
-        hidden_deltas = list()
-        for i, hidden_neuron in enumerate(hidden_layer):
-            z_i = hidden_neuron.output()
-            relu_derivative = 1 if z_i > 0 else 0
-            backprop_error = sum(
-                output_deltas[j] * output_layer[j].weights[i]
-                for j in range(len(output_layer))
-            )
-            delta = relu_derivative * backprop_error
-            hidden_deltas.append(delta)
+        da_hidden = W_output.T @ dz_output                      # (128, 1)
+        dz_hidden = da_hidden * relu_derivative(z_hidden)       # (128, 1)
+        dW_hidden = dz_hidden @ x.reshape(1, -1)                # (128, 784)
+        db_hidden = dz_hidden                                   # (128, 1)
 
-        for i, hidden_neuron in enumerate(hidden_layer):
-            delta = hidden_deltas[i]
-            for k in range(len(hidden_neuron.weights)):
-                hidden_neuron.weights[k] -= (
-                    LEARNING_RATE * delta * input_layer[k].output()
-                )
-            hidden_neuron.bias -= LEARNING_RATE * delta
+        W_output -= LEARNING_RATE * dW_output
+        b_output -= LEARNING_RATE * db_output
 
-        # Reset caches for next image
-        for neuron in hidden_layer + output_layer:
-            if hasattr(neuron, "reset_cache"):
-                neuron.reset_cache()
+        W_hidden -= LEARNING_RATE * dW_hidden
+        b_hidden -= LEARNING_RATE * db_hidden
 
-    print(
-        f"Epoch {epoch}: Total: {total} – "
-        f"Correct: {correct} — Accuracy: {(correct/total):.2%}"
-    )
+    accuracy = correct / len(images)
+    avg_loss = total_loss / len(images)
+    print(f"Epoch {epoch+1}: Loss={avg_loss:.4f}, Accuracy={accuracy:.2%}")
 
-save_model(hidden_layer=hidden_layer, output_layer=output_layer)
-print("[!] Model saved!")
+np.savez("trained_model.npz", 
+         W_hidden=W_hidden, 
+         b_hidden=b_hidden, 
+         W_output=W_output, 
+         b_output=b_output)
+print("Model saved!")

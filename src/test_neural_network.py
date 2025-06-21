@@ -1,68 +1,39 @@
 import idx2numpy
 import numpy as np
-from .utils import Perceptron, EntryNeuron, softmax
-import json
 
 images = idx2numpy.convert_from_file("src/t10k-images.idx3-ubyte")
 labels = idx2numpy.convert_from_file("src/t10k-labels.idx1-ubyte")
 
-INPUT_SIZE = 28 * 28
+model = np.load("trained_model.npz")
+W_hidden = model["W_hidden"]
+b_hidden = model["b_hidden"]
+W_output = model["W_output"]
+b_output = model["b_output"]
 
+def relu(x):
+    return np.maximum(0, x)
 
-def load_model():
-    with open("src/model.json") as stream:
-        model = json.load(stream)
-        hidden_layer = [
-            Perceptron(
-                entries=[0] * INPUT_SIZE,
-                weights=neuron["weights"],
-                bias=neuron["bias"],
-                activation_function=lambda x: max(0, x)
-            ) for neuron in model["hidden_layer"]
-        ]
-        output_layer = [
-            Perceptron(
-                entries=[0] * INPUT_SIZE,
-                weights=neuron["weights"],
-                bias=neuron["bias"],
-                activation_function=lambda output: output
-            ) for neuron in model["output_layer"]
-        ]
-        return hidden_layer, output_layer
-    raise Exception("Model not found.")
-
-hidden_layer, output_layer = load_model()
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0, keepdims=True)
 
 correct = 0
-total = 0
-for image, label in zip(images[:100], labels[:100]):
-    flat_image = np.array(image).flatten().tolist()
-    input_layer = [EntryNeuron(value=pixel) for pixel in flat_image]
+total = len(images)
+
+for image, label in zip(images, labels):
+    x = np.array(image).reshape(-1, 1) / 255.0
+
+    # Forward pass
+    z_hidden = W_hidden @ x + b_hidden
+    a_hidden = relu(z_hidden)
+
+    z_output = W_output @ a_hidden + b_output
+    y_pred = softmax(z_output)
+
+    predicted_label = np.argmax(y_pred)
     
-     # Compute the hidden layer.
-    print(f"[+] First pass: hidden layer.")
-    for perceptron in hidden_layer:
-        perceptron.entries = [
-            neuron.get_result() for neuron in input_layer
-        ]
-
-    # Compute the output layer.
-    print(f"[+] Second pass: output layer.")
-    for perceptron in output_layer:
-        perceptron.entries = [
-            neuron.get_result() for neuron in hidden_layer
-        ]
-
-    # Get the outputs.
-    outputs = [perceptron.get_result() for perceptron in output_layer]
-
-    # Softmax.
-    y_pred = softmax(outputs)
-
-    # print(f"[+] Result: {y_pred}")
-    prediction = np.argmax(y_pred)
-    print(f" Prediction: {prediction} — Correct: {label}")
-    if prediction == label:
+    if predicted_label == label:
         correct += 1
-    total += 1
-print(f"Total: {total} – Correct: {correct} — Ratio: {correct/total:.2%}")
+
+accuracy = correct / total * 100
+print(f"Test Accuracy: {accuracy:.2f}%")
